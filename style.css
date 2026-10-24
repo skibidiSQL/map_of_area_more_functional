@@ -521,6 +521,7 @@ textarea {
   z-index: 40;
   display: none;
 }
+/* ---------- аккаунт, кабинет, доступ, мобильная вёрстка ---------- */
 [hidden] { display: none !important; }
 body { min-height: 100dvh; -webkit-tap-highlight-color: transparent; }
 #sheet { max-height: 75dvh; }
@@ -565,17 +566,55 @@ body[data-nav] #nbk { display: block; }
 #dlg { position: fixed; inset: 0; background: #0008; display: grid; place-items: center; z-index: 35; }
 #dlg > div { background: var(--card); border-radius: 20px; padding: 22px; width: min(420px, 92vw); max-height: 90dvh; overflow: auto; }
 
+/* в режиме карты «плюсик» главной не показывается; удаление карт в панели */
 body[data-v=map] #home { display: none; }
 .nr { display: flex; align-items: center; gap: 2px; }
 .nr .ni { flex: 1; min-width: 0; }
 .nx { flex: none; border: 0; background: none; cursor: pointer; padding: 8px; border-radius: 10px; opacity: .55; }
 .nx:hover { opacity: 1; background: var(--bg); }
 
+/* встроенный режим (/embed): без шапки и панели */
 body[data-embed] :is(header, #hb, #nav, #nbk) { display: none; }
 body[data-embed] main { padding-top: 8px; }
 #dlg textarea { font: 12px/1.4 ui-monospace, Consolas, monospace; }
 
+/* ---------- этажи ---------- */
 #floors { display: flex; gap: 6px; overflow-x: auto; padding: 10px 4px 2px; }
 #floors button { flex: none; border: 1px solid var(--line); background: var(--card); border-radius: 99px; padding: 6px 14px; font-weight: 600; font-size: 13px; cursor: pointer; }
 #floors button.on { background: var(--red); border-color: var(--red); color: var(--on); }
 #floors .add { border-style: dashed; color: var(--red); }
+
+/* ---------- статистика ---------- */
+#dlg > div.wide { width: min(760px, 96vw); }
+.per { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
+.hbtn.on { background: var(--red); border-color: var(--red); color: var(--on); }
+.chk { display: flex; gap: 6px; align-items: center; margin: 0 0 0 auto; font-size: 13px; }
+.kp { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin: 14px 0 4px; }
+.kp div { background: var(--bg); border-radius: 14px; padding: 10px 12px; }
+.kp b { display: block; font-size: 26px; font-weight: 800; line-height: 1.1; }
+.kp small { font-size: 12px; }
+.ch { width: 100%; height: auto; display: block; }
+.cg { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 0 18px; }
+#dlg h4 { margin: 16px 0 6px; font-size: 14px; }
+.tr { position: relative; display: flex; justify-content: space-between; gap: 8px; padding: 6px 8px; border-radius: 8px; overflow: hidden; font-size: 13px; margin-bottom: 3px; }
+.tr i { position: absolute; inset: 0 auto 0 0; background: var(--red); opacity: .14; }
+.tr span, .tr b { position: relative; }
+
+/* ---------- съёмка панорамы ---------- */
+#cap { position: fixed; inset: 0; background: #000; z-index: 26; color: #fff; overscroll-behavior: none; }
+#cap .cp { position: absolute; inset: 0; overflow: auto; background: var(--bg); color: var(--tx); padding: calc(20px + env(safe-area-inset-top, 0px)) 18px 24px; max-width: 560px; margin: auto; }
+#cap ol { padding-left: 20px; } #cap li { margin: 9px 0; }
+#capv { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+#capc { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.capt { position: absolute; top: calc(10px + env(safe-area-inset-top, 0px)); left: 10px; right: 10px; display: flex; align-items: center; gap: 10px; font-weight: 800; text-shadow: 0 1px 8px #000; }
+.capt button, .capb button { border: 0; border-radius: 99px; background: #fffd; color: #111; font-weight: 800; padding: 11px 16px; cursor: pointer; }
+#caph { position: absolute; left: 12px; right: 12px; bottom: calc(118px + env(safe-area-inset-bottom, 0px)); text-align: center; font-weight: 800; font-size: 17px; text-shadow: 0 1px 8px #000, 0 0 3px #000; }
+.capb { position: absolute; left: 0; right: 0; bottom: calc(22px + env(safe-area-inset-bottom, 0px)); display: flex; gap: 12px; justify-content: center; align-items: center; }
+#cap #cs { width: 72px; height: 72px; padding: 0; border: 5px solid #fff; background: var(--red); }
+#cap #cs:disabled { opacity: .35; }
+#cpv { width: 100%; border-radius: 12px; background: #111; display: block; }
+#cap.flash { animation: fsh .25s; }
+@keyframes fsh { from { box-shadow: inset 0 0 0 100vmax #fffc; } to { box-shadow: none; } }
+
+/* длинные уведомления — не «таблетка» на пол-экрана */
+#toast { border-radius: 16px; width: max-content; max-width: min(92vw, 420px); text-align: center; }
