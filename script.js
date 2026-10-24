@@ -1,5 +1,4 @@
-
-const GW = 28, GH = 18, KEY = 'tk-spacemap-v1';
+const GW = 28, GH = 18, KEY = 'tk-spacemap-v1', PK = 'tk-spacemap-pin';
 const CATS = {
   stand: ['🏷', 'Стенд'],
   hall: ['🎤', 'Зал'],
@@ -14,27 +13,22 @@ const $ = s => document.querySelector(s),
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const brg = (a, b) => Math.atan2(b.x - a.x, -(b.y - a.y)) * 180 / Math.PI;
 
-
-const floor = (name, o = {}) => ({ id: 'f' + uid(), name, bg: null, bgo: .7, cor: [], walls: [], rooms: [], pois: [], panos: [], ...o });
-
-
+const floor = (name, o = {}) => ({ id: 'f' + uid(), name, bg: null, bgo: .7, cor: [], rooms: [], pois: [], panos: [], ...o });
 const blank = () => ({ name: '', floors: [floor('Этаж 1')] });
 
-
+// старые карты (один этаж без floors) переводим в новый формат
 function migrate(d) {
   if (!d.floors) {
-    d.floors = [floor('Этаж 1', { id: 'f1', bg: d.bg || null, cor: d.cor || [], walls: d.walls || [], rooms: d.rooms || [], pois: d.pois || [], panos: d.panos || [] })];
-    delete d.bg; delete d.cor; delete d.rooms; delete d.pois; delete d.panos; delete d.walls;
+    d.floors = [floor('Этаж 1', { id: 'f1', bg: d.bg || null, cor: d.cor || [], rooms: d.rooms || [], pois: d.pois || [], panos: d.panos || [] })];
+    delete d.bg; delete d.cor; delete d.rooms; delete d.pois; delete d.panos;
   }
   return d;
 }
-
 
 function load() {
   try { return JSON.parse(localStorage.getItem(KEY)); }
   catch { return null; }
 }
-
 
 let S = blank(),
     mode = 'v',
@@ -42,14 +36,14 @@ let S = blank(),
     sh = null,
     route = null,
     unlocked = false,
-    WS, RS, dr = null, pt = null, dg = null,
-    undoStack = [];
-
-let F = S.floors[0], fi = 0; 
-
+    WS, RS, dr = null, pt = null, dg = null;
+let F = S.floors[0], fi = 0; // F — активный этаж
 
 function save() { if (window.Core && Core.onSave) Core.onSave(S); }
 
+// статистика: считаем только действия посетителя (app.js складывает события и отправляет в облако)
+const track = (k, t) => { if (mode == 'v' && window.Core && Core.onTrack) Core.onTrack(k, t); };
+let undoPlan = null;
 
 function toast(t) {
   const e = $('#toast');
@@ -59,42 +53,9 @@ function toast(t) {
   toast.t = setTimeout(() => e.style.display = 'none', 2600);
 }
 
-
-function pushState() {
-  if (mode !== 'o') return;
-  const cur = JSON.stringify({ fi, S });
-  if (undoStack.length === 0 || undoStack[undoStack.length - 1] !== cur) {
-    undoStack.push(cur);
-    if (undoStack.length > 30) undoStack.shift();
-  }
-}
-
-
-function undo() {
-  if (mode !== 'o' || undoStack.length === 0) return;
-  const prev = JSON.parse(undoStack.pop());
-  S = prev.S;
-  fi = prev.fi;
-  if (fi >= S.floors.length) fi = Math.max(0, S.floors.length - 1);
-  F = S.floors[fi];
-  sh = null; route = null; dr = null; pt = null; dg = null;
-  save(); plan(); sheet();
-  toast('Отменено');
-}
-
-
-window.addEventListener('keydown', e => {
-  if ((e.ctrlKey || e.metaKey) && e.code === 'KeyZ') {
-    undo();
-    e.preventDefault();
-  }
-});
-
-
 const P = id => F.pois.find(p => p.id == id),
       N = id => F.panos.find(p => p.id == id),
       R_ = id => F.rooms.find(r => r.id == id);
-
 
 function mk() {
   WS = new Set(F.cor);
@@ -109,30 +70,18 @@ function mk() {
   });
 }
 
-
 function bfs(a, b) {
   const q = [[a.x, a.y]],
         prev = { [a.x + ',' + a.y]: null },
         t = b.x + ',' + b.y;
-  
-  const walls = new Set(F.walls || []);
         
   for (let i = 0; i < q.length && !(t in prev); i++) {
     const [x, y] = q[i];
-    
-    const moves = [
-      [1, 0, `${x+1},${y},v`],
-      [-1, 0, `${x},${y},v`],
-      [0, 1, `${x},${y+1},h`],
-      [0, -1, `${x},${y},h`]
-    ];
-    
-    for (const [dx, dy, wall] of moves) {
-      const nx = x + dx, ny = y + dy;
-      const k = nx + ',' + ny;
-      if (WS.has(k) && !(k in prev) && !walls.has(wall)) {
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const k = (x + dx) + ',' + (y + dy);
+      if (WS.has(k) && !(k in prev)) {
         prev[k] = x + ',' + y;
-        q.push([nx, ny]);
+        q.push([x + dx, y + dy]);
       }
     }
   }
@@ -143,7 +92,7 @@ function bfs(a, b) {
   return p.reverse();
 }
 
-
+/* ---------- план ---------- */
 function plan() {
   mk();
   const svg = $('#plan');
@@ -168,19 +117,6 @@ function plan() {
   
   h += `<path d="${w}" stroke="var(--wall)" stroke-width=".16" stroke-linecap="square" fill="none"/>`;
   
-  if (F.walls) {
-    let wp = '';
-    F.walls.forEach(k => {
-      const [x, y, d] = k.split(',');
-      if (d == 'h') wp += `M${x} ${y}h1`;
-      if (d == 'v') wp += `M${x} ${y}v1`;
-    });
-    if (wp) {
-      h += `<path d="${wp}" stroke="#a09b95" stroke-width=".26" stroke-linecap="round" fill="none"/>`;
-      h += `<path d="${wp}" stroke="#ffffff" stroke-width=".16" stroke-linecap="round" fill="none"/>`;
-    }
-  }
-  
   F.rooms.forEach(r => h += `<text x="${r.x + r.w / 2}" y="${r.y + .75}" class="lbl" style="font-size:.5px;fill:var(--mut);stroke:none">${esc(r.name)}</text>`);
   
   if (dr) {
@@ -200,11 +136,10 @@ function plan() {
   if (mode == 'o' && !F.bg && !WS.size) h += `<text x="14" y="9" class="lbl" style="font-size:.6px;fill:var(--mut);stroke:none">Загрузите готовый план (⚙ Карта) или нарисуйте залы и коридоры</text>`;
   svg.innerHTML = h;
   floorsBar();
-  svg.style.touchAction = mode == 'o' && ['room', 'cor', 'wall', 'era'].includes(tool) ? 'none' : 'pan-y';
+  svg.style.touchAction = mode == 'o' && ['room', 'cor', 'era'].includes(tool) ? 'none' : 'pan-y';
   $('#mname').textContent = S.name;
   $('#chips').innerHTML = F.pois.map(p => `<button data-c="${p.id}">${CATS[p.cat][0]} ${esc(p.name)}</button>`).join('');
 }
-
 
 function floorsBar() {
   const el = $('#floors');
@@ -212,7 +147,6 @@ function floorsBar() {
   el.innerHTML = S.floors.map((f, i) => `<button data-fl="${i}" class="${i == fi ? 'on' : ''}">${esc(f.name)}</button>`).join('') +
     (mode == 'o' ? '<button data-fl="add" class="add">＋ Этаж</button>' : '');
 }
-
 
 function goFloor(i) {
   if (i == fi || !S.floors[i]) return;
@@ -222,9 +156,7 @@ function goFloor(i) {
   plan(); sheet();
 }
 
-
 function addFloor() {
-  pushState();
   const f = floor('Этаж ' + (S.floors.length + 1));
   S.floors.push(f); fi = S.floors.length - 1; F = f;
   route = null; sh = { t: 'menu' }; tool = 'menu';
@@ -232,28 +164,25 @@ function addFloor() {
   toast('Этаж добавлен — загрузите план или нарисуйте залы');
 }
 
-
 $('#floors').onclick = e => {
   const b = e.target.closest('[data-fl]');
   if (!b) return;
   if (b.dataset.fl == 'add') addFloor(); else goFloor(+b.dataset.fl);
 };
 
-
 function tools() {
-  $('#tools').innerHTML = [['sel', '☝ Выбор'], ['room', '▭ Зал'], ['cor', '▬ Коридор'], ['wall', '⬜ Стена'], ['era', '⌫ Ластик'], ['poi', '📍 Точка'], ['pano', '📷 Панорама'], ['undo', '↩ Назад'], ['menu', '⚙ Карта']]
+  $('#tools').innerHTML = [['sel', '☝ Выбор'], ['room', '▭ Зал'], ['cor', '▬ Коридор'], ['era', '⌫ Ластик'], ['poi', '📍 Точка'], ['pano', '📷 Панорама'], ['menu', '⚙ Карта']]
     .map(([t, l]) => `<button data-t="${t}" class="${tool == t ? 'on' : ''}">${l}</button>`)
     .join('');
 }
 
 const svg = $('#plan');
 
-
+// можно ли поставить точку в клетку: на проходимую (если залы/коридоры нарисованы) или куда угодно поверх готового плана
 const canPut = (x, y, it) => {
   const free = !WS.size && !!F.bg;
   return (free || WS.has(x + ',' + y)) && !F.pois.concat(F.panos).some(o => o !== it && o.x == x && o.y == y);
 };
-
 
 function cell(e) {
   const r = svg.getBoundingClientRect();
@@ -263,53 +192,20 @@ function cell(e) {
   ];
 }
 
-
-function edge(e) {
-  const r = svg.getBoundingClientRect();
-  let rx = (e.clientX - r.left) / r.width * GW;
-  let ry = (e.clientY - r.top) / r.height * GH;
-  rx = Math.max(0, Math.min(GW, rx));
-  ry = Math.max(0, Math.min(GH, ry));
-  
-  let x = Math.floor(rx), y = Math.floor(ry);
-  if (x >= GW) x = GW - 1;
-  if (y >= GH) y = GH - 1;
-  
-  const dx = rx - x, dy = ry - y;
-  const distL = dx, distR = 1 - dx, distT = dy, distB = 1 - dy;
-  const min = Math.min(distL, distR, distT, distB);
-
-  if (min == distT) return `${x},${y},h`;
-  if (min == distB) return `${x},${y+1},h`;
-  if (min == distL) return `${x},${y},v`;
-  return `${x+1},${y},v`;
-}
-
-
-function paint(x, y, ed) {
+function paint(x, y) {
   const k = x + ',' + y;
-  if (tool == 'cor' && !WS.has(k)) { 
-    F.cor.push(k); 
-  }
-  if (tool == 'wall') { 
-    if (!F.walls) F.walls = [];
-    if (!F.walls.includes(ed)) F.walls.push(ed);
-  }
+  if (tool == 'cor' && !WS.has(k)) F.cor.push(k);
   if (tool == 'era') {
-    if (F.cor) F.cor = F.cor.filter(c => c != k);
-    if (F.walls) F.walls = F.walls.filter(w => w != ed);
+    F.cor = F.cor.filter(c => c != k);
     F.rooms = F.rooms.filter(r => !(x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h));
   }
   plan();
 }
 
-
 svg.onpointerdown = e => {
-  if (mode == 'o') pushState();
   const [x, y] = cell(e);
-  const ed = edge(e);
   svg.setPointerCapture(e.pointerId);
-  pt = { x, y, lx: x, ly: y, le: ed, m: false };
+  pt = { x, y, lx: x, ly: y, m: false };
   dg = null;
   if (mode == 'o' && ['sel', 'poi', 'pano'].includes(tool)) {
     const it = F.pois.find(p => p.x == x && p.y == y) || F.panos.find(p => p.x == x && p.y == y);
@@ -317,25 +213,22 @@ svg.onpointerdown = e => {
   }
   if (mode == 'o') {
     if (tool == 'room') dr = { x0: x, y0: y, x1: x, y1: y };
-    if (tool == 'cor' || tool == 'wall' || tool == 'era') paint(x, y, ed);
+    if (tool == 'cor' || tool == 'era') paint(x, y);
   }
 };
-
 
 svg.onpointermove = e => {
   if (!pt) return;
   const [x, y] = cell(e);
-  const ed = edge(e);
-  if (x == pt.lx && y == pt.ly && ed == pt.le) return;
-  pt.lx = x; pt.ly = y; pt.le = ed; pt.m = true;
-  if (dg) {
+  if (x == pt.lx && y == pt.ly) return;
+  pt.lx = x; pt.ly = y; pt.m = true;
+  if (dg) { // тащим точку/панораму
     if (canPut(x, y, dg.it)) { dg.it.x = x; dg.it.y = y; dg.moved = true; plan(); }
     return;
   }
   if (dr) { dr.x1 = x; dr.y1 = y; plan(); }
-  else if (mode == 'o' && (tool == 'cor' || tool == 'wall' || tool == 'era')) paint(x, y, ed);
+  else if (mode == 'o' && (tool == 'cor' || tool == 'era')) paint(x, y);
 };
-
 
 svg.onpointerup = e => {
   if (!pt) return;
@@ -353,24 +246,21 @@ svg.onpointerup = e => {
     plan();
     sheet();
   }
-  else if (mode == 'o' && (tool == 'cor' || tool == 'wall' || tool == 'era')) { save(); }
+  else if (mode == 'o' && (tool == 'cor' || tool == 'era')) { save(); }
   else if (!pt.m) { tap(x, y); }
   pt = null;
 };
 
-
 svg.onpointercancel = () => { if (dg && dg.moved) save(); dg = null; pt = null; plan(); };
-
-
+// на телефоне не даём странице прокручиваться, пока тащим точку
 svg.addEventListener('touchmove', e => { if (dg) e.preventDefault(); }, { passive: false });
-
 
 function tap(x, y) {
   const poi = F.pois.find(p => p.x == x && p.y == y),
         pn = F.panos.find(p => p.x == x && p.y == y),
         o = mode == 'o';
         
-  if (poi) { sh = { t: o ? 'ep' : 'pv', id: poi.id }; }
+  if (poi) { sh = { t: o ? 'ep' : 'pv', id: poi.id }; if (!o) track('poi', poi.id); }
   else if (pn) { if (o && tool != 'sel' || o) { sh = { t: 'en', id: pn.id }; } else { openPano(pn.id); } }
   else if (o && tool == 'poi' && canPut(x, y)) {
     const p = { id: 'p' + uid(), x, y, name: 'Новая точка', cat: 'other', desc: '' };
@@ -390,7 +280,7 @@ function tap(x, y) {
   sheet();
 }
 
-
+/* ---------- панель ---------- */
 const nearPano = p => {
   let b = null, d = 6;
   F.panos.forEach(n => {
@@ -399,7 +289,6 @@ const nearPano = p => {
   });
   return b;
 };
-
 
 function recalc() {
   if (!route) return;
@@ -419,9 +308,7 @@ function recalc() {
   }
 }
 
-
 const opts = (sel) => F.pois.map(p => `<option value="${p.id}" ${p.id == sel ? 'selected' : ''}>${esc(p.name)}</option>`).join('');
-
 
 const head = (ic, t, s) => `<div class="grab"></div><div class="row"><span class="ic">${ic}</span><div><h3>${esc(t)}</h3><small>${s}</small></div><button class="x" data-a="x">✕</button></div>`;
 
@@ -441,7 +328,7 @@ function sheet() {
   }
   if (sh.t == 'en') {
     const p = N(sh.id);
-    h = head('📷', 'Панорама', p.src ? 'своё фото' : 'без фото') + `<label>Название</label><input type="text" data-f="name" value="${esc(p.name)}"><label>Загрузить панораму 360° (equirectangular)</label><input type="file" accept="image/*" data-up="pano"><label>Поворот относительно плана: ${p.rot}°</label><input type="range" min="0" max="359" value="${p.rot}" data-f="rot" style="width:100%"><div class="btns"><button class="pri" data-a="pano" data-id="${p.id}">Открыть и добавить точки</button><button class="del" data-a="deln">Удалить</button></div>`;
+    h = head('📷', 'Панорама', p.src ? 'своё фото' : 'без фото') + `<label>Название</label><input type="text" data-f="name" value="${esc(p.name)}"><div class="btns"><button class="pri" data-a="cap">📱 Снять камерой телефона</button></div><label>…или загрузить готовую панораму 360° (пропорции 2:1)</label><input type="file" accept="image/*" data-up="pano"><label>Поворот относительно плана: ${p.rot}°</label><input type="range" min="0" max="359" value="${p.rot}" data-f="rot" style="width:100%"><div class="btns"><button class="pri" data-a="pano" data-id="${p.id}">Открыть и добавить точки</button><button class="del" data-a="deln">Удалить</button></div>`;
   }
   if (sh.t == 'er') {
     const r = R_(sh.id);
@@ -450,6 +337,7 @@ function sheet() {
   if (sh.t == 'rt') {
     recalc();
     const r = route, m = r.path ? (r.path.length - 1) * 2 : 0;
+    if (r.path && r.tk != r.from + '>' + r.to) { r.tk = r.from + '>' + r.to; track('route', r.to); }
     h = head('🧭', 'Маршрут', 'по плану здания') + `<label>Откуда</label><select data-r="from">${opts(r.from)}</select><label>Куда</label><select data-r="to">${opts(r.to)}</select>` + (r.path ? `<div class="stat"><span>${m} м<small>путь</small></span><span>${Math.max(1, Math.round(m / 80))} мин<small>пешком</small></span><span>${r.tour.length}<small>панорам</small></span></div><div class="btns"><button class="pri" data-a="tour">Пройти по панорамам</button></div>` : `<p><small>${r.from == r.to ? 'Выберите разные точки.' : 'Маршрут не найден: проверьте, что коридоры соединены.'}</small></p>`);
   }
   if (sh.t == 'menu') {
@@ -460,6 +348,7 @@ function sheet() {
       `<label>План этажа: готовое изображение (JPG, PNG)</label><input type="file" accept="image/*" data-up="bg">` +
       (F.bg ? `<label>Прозрачность плана: ${Math.round((F.bgo ?? .7) * 100)}%</label><input type="range" min="10" max="100" value="${Math.round((F.bgo ?? .7) * 100)}" data-ff="bgo" style="width:100%">` : '') +
       `<div class="btns">${F.bg ? '<button data-a="nobg">Убрать план</button>' : ''}${S.floors.length > 1 ? '<button class="del" data-a="delf">Удалить этаж</button>' : ''}</div>` +
+      `<label>✨ Авто-план: создать залы и коридоры по изображению</label><input type="file" accept="image/*" data-up="auto"><p><small>Загрузите чертёж, скан или фото плана: тёмные стены на светлом фоне. Результат можно поправить инструментами.</small></p>${undoPlan && undoPlan.f === F ? '<div class="btns"><button data-a="undoauto">↶ Отменить авто-план</button></div>' : ''}` +
       `<label>План этажа из JSON-файла</label><input type="file" accept=".json,application/json" data-up="json"><div class="btns"><button data-a="dlfloor">⬇ Скачать этаж (.json)</button></div><p><small>Файл можно загрузить на любой этаж; формат тот же, что даёт «Скачать этаж».</small></p>` +
       `<label>Данные карты (JSON) — копируйте или вставьте для переноса</label><textarea id="json" style="min-height:90px">${esc(JSON.stringify(full))}</textarea>` +
       `<div class="btns"><button data-a="imp">Применить JSON</button></div><p><small>Изменения сохраняются автоматически на устройстве.</small></p>`;
@@ -468,9 +357,7 @@ function sheet() {
   if (h) el.innerHTML = h;
 }
 
-
 const cur = () => sh.t == 'ep' ? P(sh.id) : sh.t == 'en' ? N(sh.id) : sh.t == 'er' ? R_(sh.id) : sh.t == 'menu' ? S : null;
-
 
 $('#sheet').oninput = e => {
   const t = e.target, o = cur();
@@ -489,13 +376,11 @@ $('#sheet').oninput = e => {
   }
 };
 
-
+/* ---------- план этажа из JSON-файла ---------- */
 const okUrl = u => typeof u == 'string' && /^(https?:\/\/|data:image\/)/.test(u) && !/["<>\s]/.test(u);
-
-
 const isEmpty = f => !f.bg && !f.cor.length && !f.rooms.length && !f.pois.length && !f.panos.length;
 
-
+// приводим этаж из файла к нашему формату: отбрасываем всё некорректное и выходящее за сетку
 function cleanFloor(f, used) {
   if (!f || typeof f != 'object') throw new Error('bad floor');
   const arr = v => Array.isArray(v) ? v : [], int = v => Number.isFinite(+v) ? Math.round(+v) : NaN,
@@ -504,10 +389,6 @@ function cleanFloor(f, used) {
   const cor = [...new Set(arr(f.cor).map(c => Array.isArray(c) ? c.join(',') : String(c)).filter(k => {
     const p = k.split(',').map(Number);
     return p.length == 2 && p.every(Number.isInteger) && inGrid(p[0], p[1]);
-  }))];
-  const walls = [...new Set(arr(f.walls).map(c => Array.isArray(c) ? c.join(',') : String(c)).filter(k => {
-    const p = k.split(',');
-    return p.length == 3 && Number.isInteger(+p[0]) && Number.isInteger(+p[1]) && (p[2] == 'h' || p[2] == 'v');
   }))];
   const rooms = arr(f.rooms).map(r => ({ x: int(r.x), y: int(r.y), w: int(r.w), h: int(r.h), name: String(r.name ?? 'Зал'), id: r.id }))
     .filter(r => [r.x, r.y, r.w, r.h].every(Number.isFinite) && r.w > 0 && r.h > 0 && inGrid(r.x, r.y))
@@ -520,9 +401,8 @@ function cleanFloor(f, used) {
       src: okUrl(n.src) ? n.src : (n.src == '…' ? '…' : undefined), hs: arr(n.hs).filter(h => ids.has(h.poi) && Number.isFinite(+h.yaw) && Number.isFinite(+h.pitch)).map(h => ({ poi: h.poi, yaw: +h.yaw, pitch: +h.pitch })) }))
     .filter(n => Number.isFinite(n.x) && Number.isFinite(n.y) && inGrid(n.x, n.y))
     .map(n => { n.id = uniq(n.id, 'n'); if (!n.src) { delete n.src; n.demo = n.name; } return n; });
-  return { name: String(f.name || ''), bg: f.bg == '…' ? '…' : (okUrl(f.bg) ? f.bg : null), bgo: Number.isFinite(+f.bgo) ? Math.min(1, Math.max(.1, +f.bgo)) : .7, cor, walls, rooms, pois, panos };
+  return { name: String(f.name || ''), bg: f.bg == '…' ? '…' : (okUrl(f.bg) ? f.bg : null), bgo: Number.isFinite(+f.bgo) ? Math.min(1, Math.max(.1, +f.bgo)) : .7, cor, rooms, pois, panos };
 }
-
 
 function importPlan(text) {
   const j = JSON.parse(text);
@@ -530,6 +410,7 @@ function importPlan(text) {
   const list = Array.isArray(j.floors) ? j.floors : [j];
   if (!list.length) throw new Error('no floors');
   const multi = list.length > 1;
+  // id панорам должны быть уникальны на всей карте (по ним кэшируются текстуры)
   const used = new Set();
   if (!multi) S.floors.forEach(f => { if (f !== F) f.panos.forEach(p => used.add(p.id)); });
   const clean = list.map(f => cleanFloor(f, used));
@@ -556,14 +437,13 @@ function downloadFloor() {
   setTimeout(() => URL.revokeObjectURL(a.href), 4e4);
 }
 
-
+/* --- НОВАЯ АСИНХРОННАЯ ЛОГИКА ЗАГРУЗКИ --- */
 $('#sheet').onchange = async e => {
   const t = e.target;
   if (t.dataset.r) { route[t.dataset.r] = t.value; sheet(); plan(); return; }
   if (t.dataset.f == 'cat') { sheet(); }
   
   if (t.dataset.up && t.files[0]) {
-    pushState();
     const file = t.files[0];
     
     if (t.dataset.up == 'bg') {
@@ -578,6 +458,8 @@ $('#sheet').onchange = async e => {
           if (r) { save(); plan(); sheet(); toast('План загружен: залов ' + r.rooms + ', точек ' + r.pois + ', панорам ' + r.panos); }
           else { sheet(); }
         } catch (err) { console.error('plan json', err); toast('Не удалось прочитать файл: это не JSON плана'); sheet(); }
+    } else if (t.dataset.up == 'auto') {
+        await autoPlanFlow(file);
     } else {
         toast('Загружаем панораму в облако...');
         try {
@@ -587,7 +469,7 @@ $('#sheet').onchange = async e => {
                 const n = N(sh.id); 
                 n.src = publicUrl; 
                 n.demo = null; 
-                delete TX[n.id];
+                dropTex(n.id);
                 save(); plan(); sheet(); toast('Панорама загружена'); 
             } else {
                 /* ошибка уже показана в uploadPanorama */
@@ -598,7 +480,25 @@ $('#sheet').onchange = async e => {
     }
   }
 };
+/* ----------------------------------------- */
 
+/* --- авто-план по изображению --- */
+async function autoPlanFlow(file) {
+  toast('Распознаём план…');
+  let r;
+  try { r = await AutoPlan.fromFile(file, GW, GH); }
+  catch (e) { console.error(e); toast('Не удалось обработать изображение'); sheet(); return; }
+  if (!r.rooms.length && !r.cor.length) { toast('Помещения не найдены (' + (r.note || 'нет данных') + '). Нужен чёткий план: тёмные стены на светлом фоне'); sheet(); return; }
+  if ((F.cor.length || F.rooms.length) && !confirm('Заменить нарисованные залы и коридоры этажа результатом распознавания?')) { sheet(); return; }
+  undoPlan = { f: F, cor: F.cor, rooms: F.rooms, bg: F.bg };
+  F.cor = r.cor; F.rooms = r.rooms;
+  // исходное изображение ложится подложкой — видно, как совпало
+  let url = null;
+  try { url = window.uploadImage ? await window.uploadImage(file, { max: 2400, q: .9, prefix: 'plans/' }) : null; } catch {}
+  if (url) F.bg = url; else await new Promise(ok => img(file, 1600, src => { F.bg = src; ok(); }));
+  save(); plan(); sheet();
+  toast('Готово: залов ' + r.rooms.length + ', клеток коридоров ' + r.cor.length + (r.note ? '. ' + r.note : '') + '. Поправьте инструментами при необходимости');
+}
 
 function img(f, mx, cb) {
   const fr = new FileReader();
@@ -618,15 +518,14 @@ function img(f, mx, cb) {
   fr.readAsDataURL(f);
 }
 
-
 $('#sheet').onclick = e => {
   const b = e.target.closest('[data-a]');
   if (!b) return;
   const a = b.dataset.a;
   
-  if (['delp', 'deln', 'delr', 'nobg', 'imp', 'delf'].includes(a)) pushState();
-
   if (a == 'x') { sh = null; }
+  if (a == 'cap') { const id = sh.id; sh = null; sheet(); Capture.open(id); return; }
+  if (a == 'undoauto' && undoPlan && undoPlan.f === F) { F.cor = undoPlan.cor; F.rooms = undoPlan.rooms; F.bg = undoPlan.bg; undoPlan = null; toast('Авто-план отменён'); }
   if (a == 'to') { route = { from: (F.pois.find(p => p.id != sh.id) || {}).id, to: sh.id }; sh = { t: 'rt' }; }
   if (a == 'pano') { openPano(b.dataset.id, undefined); return; }
   if (a == 'tour') { if (!route.tour.length) return toast('Вдоль маршрута нет панорам'); openPano(route.tour[0], route.tour); return; }
@@ -635,10 +534,12 @@ $('#sheet').onclick = e => {
   if (a == 'delr') { F.rooms = F.rooms.filter(r => r.id != sh.id); sh = null; }
   if (a == 'dlfloor') { downloadFloor(); return; }
   if (a == 'nobg') { F.bg = null; }
+  if (a == 'pin') { localStorage.removeItem(PK); unlocked = false; toast('PIN сброшен: задайте новый при следующем входе'); setMode('v'); }
   if (a == 'imp') {
     try {
       const j = JSON.parse($('#json').value);
       if (j.floors) {
+        // картинки в JSON заменены на «…» — возвращаем из текущих данных
         const old = {}; S.floors.forEach(f => f.panos.forEach(p => old[p.id] = p.src));
         j.floors.forEach(f => {
           const o = S.floors.find(x => x.id == f.id);
@@ -646,11 +547,11 @@ $('#sheet').onclick = e => {
           (f.panos || []).forEach(p => { p.src = old[p.id]; });
         });
         S = { ...S, ...j };
-        S.floors.forEach(f => Object.assign(f, { cor: f.cor || [], walls: f.walls || [], rooms: f.rooms || [], pois: f.pois || [], panos: f.panos || [] }));
-      } else { 
+        S.floors.forEach(f => Object.assign(f, { cor: f.cor || [], rooms: f.rooms || [], pois: f.pois || [], panos: f.panos || [] }));
+      } else { // старый формат — применяем к текущему этажу
         const keep = {}; F.panos.forEach(p => keep[p.id] = p.src);
         (j.panos || []).forEach(p => { p.src = keep[p.id]; });
-        Object.assign(F, { cor: j.cor || [], walls: j.walls || [], rooms: j.rooms || [], pois: j.pois || [], panos: j.panos || [] });
+        Object.assign(F, { cor: j.cor || [], rooms: j.rooms || [], pois: j.pois || [], panos: j.panos || [] });
         if (j.name) S.name = j.name;
       }
       fi = Math.min(fi, S.floors.length - 1); F = S.floors[fi];
@@ -667,7 +568,7 @@ $('#sheet').onclick = e => {
 
 $('#chips').onclick = e => {
   const b = e.target.closest('[data-c]');
-  if (b) { sh = { t: 'pv', id: b.dataset.c }; plan(); sheet(); }
+  if (b) { sh = { t: 'pv', id: b.dataset.c }; track('poi', b.dataset.c); plan(); sheet(); }
 };
 
 $('#rbtn').onclick = () => {
@@ -678,14 +579,19 @@ $('#rbtn').onclick = () => {
 $('#tools').onclick = e => {
   const b = e.target.closest('[data-t]');
   if (!b) return;
-  if (b.dataset.t == 'undo') { undo(); return; }
   tool = b.dataset.t;
   if (tool == 'menu') { sh = { t: 'menu' }; }
   else if (sh && sh.t == 'menu') sh = null;
   tools(); plan(); sheet();
 };
 
-
+/* ---------- доступ ---------- */
+async function hash(s) {
+  try {
+    const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode('tk' + s));
+    return [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, '0')).join('');
+  } catch { return btoa(s); }
+}
 
 function setMode(m) {
   mode = m;
@@ -696,18 +602,37 @@ function setMode(m) {
   tools(); plan(); sheet();
 }
 
-
 $('#mv').onclick = () => setMode('v');
 
-
 $('#mo').onclick = () => {
-  if (unlocked) setMode('o');
+  if (unlocked) return setMode('o');
+  let has = null;
+  try { has = localStorage.getItem(PK); } catch {}
+  
+  const md = $('#modal'), bx = md.firstElementChild;
+  md.hidden = false;
+  bx.innerHTML = `<h3>${has ? 'Вход для организатора' : 'Задайте PIN организатора'}</h3><p><small>${has ? 'Введите PIN, чтобы редактировать карту.' : 'Минимум 4 символа. Он защитит редактор от посетителей.'}</small></p><input type="password" id="pin" autocomplete="off"><div class="btns"><button class="pri" id="pok">${has ? 'Войти' : 'Сохранить'}</button><button id="pcn">Отмена</button></div>`;
+  
+  const f = $('#pin');
+  f.focus();
+  $('#pcn').onclick = () => md.hidden = true;
+  
+  const go = async () => {
+    const v = f.value;
+    if (v.length < 4) return toast('PIN короче 4 символов');
+    const hh = await hash(v);
+    if (!has) { try { localStorage.setItem(PK, hh); } catch {} }
+    else if (hh != has) return toast('Неверный PIN');
+    unlocked = true; md.hidden = true; setMode('o');
+  };
+  
+  $('#pok').onclick = go;
+  f.onkeydown = e => { if (e.key == 'Enter') go(); };
 };
 
-
+/* ---------- панорамы ---------- */
 let RN, SC, CAM, MESH, V = null, TX = {}, raf = 0;
 const cv = $('#cv');
-
 
 function gen(name) {
   const c = document.createElement('canvas');
@@ -753,6 +678,7 @@ function gen(name) {
   return c;
 }
 
+function dropTex(id) { if (TX[id]) { TX[id].dispose(); delete TX[id]; } }
 
 function tex(p) {
   if (TX[p.id]) return TX[p.id];
@@ -762,12 +688,10 @@ function tex(p) {
   return TX[p.id] = t;
 }
 
-
 const vec = (y, p) => {
   const a = y * Math.PI / 180, b = p * Math.PI / 180;
   return new THREE.Vector3(Math.sin(a) * Math.cos(b), Math.sin(b), -Math.cos(a) * Math.cos(b));
 };
-
 
 function openPano(id, tour) {
   if (typeof THREE == 'undefined') return toast('Не удалось загрузить 3D-библиотеку');
@@ -776,12 +700,13 @@ function openPano(id, tour) {
     RN.setPixelRatio(Math.min(devicePixelRatio, 2));
     SC = new THREE.Scene();
     CAM = new THREE.PerspectiveCamera(75, 1, .1, 1100);
-    const g = new THREE.SphereGeometry(500, 48, 32);
+    const g = new THREE.SphereGeometry(500, 80, 56);
     g.scale(-1, 1, 1);
     MESH = new THREE.Mesh(g, new THREE.MeshBasicMaterial());
     SC.add(MESH);
   }
   const p = N(id);
+  track('pano', id);
   V = { ...(V || { yaw: 0, pitch: 0, fov: 75 }), id, add: false, tour: tour === undefined ? (V && V.tour) : tour };
   sh = null; sheet();
   $('#pv').hidden = false;
@@ -806,12 +731,10 @@ function build() {
   V.els = [...$('#hsl').children];
 }
 
-
 function bar() {
   const t = V.tour, i = t ? t.indexOf(V.id) : -1;
   $('#pvbar').innerHTML = (t && i >= 0 ? `<button data-v="prev" ${i ? '' : 'disabled'}>◀</button><button>${i + 1} / ${t.length}</button><button data-v="next" ${i < t.length - 1 ? '' : 'disabled'}>▶</button>` : '') + (mode == 'o' ? `<button data-v="add" class="${V.add ? 'on' : ''}">＋ Точка на панораме</button>` : '');
 }
-
 
 function loop() {
   raf = requestAnimationFrame(loop);
@@ -833,10 +756,7 @@ function loop() {
 
 let gd = null;
 
-
 cv.onpointerdown = e => { gd = { x: e.clientX, y: e.clientY, m: 0 }; cv.setPointerCapture(e.pointerId); };
-
-
 cv.onpointermove = e => {
   if (!gd) return;
   const dx = e.clientX - gd.x, dy = e.clientY - gd.y;
@@ -845,8 +765,6 @@ cv.onpointermove = e => {
   const k = V.fov / cv.clientHeight;
   V.yaw -= dx * k; V.pitch = Math.max(-85, Math.min(85, V.pitch + dy * k));
 };
-
-
 cv.onpointerup = e => {
   if (gd && gd.m < 6) {
     $('#pvinfo').style.display = 'none';
@@ -861,10 +779,7 @@ cv.onpointerup = e => {
   }
   gd = null;
 };
-
-
-cv.onwheel = e => { V.fov = Math.max(40, Math.min(100, V.fov + e.deltaY * .05)); };
-
+cv.onwheel = e => { V.fov = Math.max(30, Math.min(100, V.fov + e.deltaY * .05)); };
 
 $('#pv').onclick = e => {
   const b = e.target.closest('button');
@@ -896,22 +811,21 @@ $('#pv').onclick = e => {
   }
 };
 
-
+/* ---------- вход в карту (вызывается из app.js) ---------- */
 window.Core = {
   open(d, r) {
     S = migrate(d); fi = 0; F = S.floors[0]; TX = {}; route = null; sh = null;
-    undoStack = [];
     if (V) { $('#pv').hidden = true; V = null; }
     unlocked = r != 'view';
     setMode('v');
+    track('map', '');
     $('.seg').style.display = unlocked ? '' : 'none';
   }
 };
 
+/* ---------- панорама на телефоне: щипок для зума ---------- */
 const pts = new Map();
 cv.addEventListener('pointerdown', e => { pts.set(e.pointerId, e); if (pts.size == 2) gd = null; });
-
-
 cv.addEventListener('pointermove', e => {
   if (!pts.has(e.pointerId)) return;
   const two = pts.size == 2, [a, b] = [...pts.values()],
@@ -919,10 +833,8 @@ cv.addEventListener('pointermove', e => {
   pts.set(e.pointerId, e);
   if (two && V) {
     const [c, d] = [...pts.values()];
-    V.fov = Math.max(40, Math.min(100, V.fov * before / Math.max(1, Math.hypot(c.clientX - d.clientX, c.clientY - d.clientY))));
+    V.fov = Math.max(30, Math.min(100, V.fov * before / Math.max(1, Math.hypot(c.clientX - d.clientX, c.clientY - d.clientY))));
   }
 });
-
-
 cv.addEventListener('pointerup', e => pts.delete(e.pointerId));
 cv.addEventListener('pointercancel', e => { pts.delete(e.pointerId); gd = null; });

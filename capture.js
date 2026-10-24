@@ -154,7 +154,7 @@ const Capture = (() => {
         url = s.toDataURL('image/jpeg', .8); toast('Облако недоступно — панорама сохранена на этом устройстве');
       }
       const n = N(S.id), id = S.id;
-      if (n) { pushState(); n.src = url; n.demo = null; dropTex(id); save(); plan(); }
+      if (n) { n.src = url; n.demo = null; dropTex(id); save(); plan(); }
       close(); if (n) openPano(id);
     } catch (e) { console.error(e); toast('Не удалось собрать панораму'); }
     finally { if (S) S.busy = false; }

@@ -1,48 +1,49 @@
-(() => { 
-const SUPABASE_URL = 'https://rlzgzbviuvkuzhcfyzcg.supabase.co'; 
-const SUPABASE_ANON_KEY = 'sb_publishable_STl70_TA-R8cRWX9qsw_DA_GxuGw0WZ'; 
-const supabase = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null; 
+/* Карта пространства: бессерверная PWA-версия (Supabase + IndexedDB). */
+(() => {
+const SUPABASE_URL = 'https://rlzgzbviuvkuzhcfyzcg.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_STl70_TA-R8cRWX9qsw_DA_GxuGw0WZ';
+const supabase = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
-let BASE = location.origin + location.pathname.replace(/\/(index\.html)?$/, ''); 
-const PKG = window.__PKG || null, 
-      THREE_URL = 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js', 
-      EMB = /\/embed\/?$/.test(location.pathname);  
-let rec = null, role = 'view', st = 0; 
+let BASE = location.origin + location.pathname.replace(/\/(index\.html)?$/, '');
+const PKG = window.__PKG || null,
+      THREE_URL = 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js',
+      EMB = /\/embed\/?$/.test(location.pathname);
+let rec = null, role = 'view', st = 0;
 
-const body = document.body, 
-      rnd = () => [...crypto.getRandomValues(new Uint8Array(12))].map(b => b.toString(36).padStart(2, '0')).join(''), 
-      view = v => body.dataset.v = v, 
+const body = document.body,
+      rnd = () => [...crypto.getRandomValues(new Uint8Array(12))].map(b => b.toString(36).padStart(2, '0')).join(''),
+      view = v => body.dataset.v = v,
       nav_ = on => body.toggleAttribute('data-nav', on),
-      dq = () => JSON.parse(localStorage.getItem('tk-del') || '[]'), 
-      dlg = h => { const d = $('#dlg'); d.firstElementChild.innerHTML = h; d.hidden = false; }, 
-      undlg = () => $('#dlg').hidden = true, 
-      link = r => BASE + '/#/m/' + r.id + '/' + r.share.token, 
-      esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); 
+      dq = () => JSON.parse(localStorage.getItem('tk-del') || '[]'),
+      dlg = h => { const d = $('#dlg'); d.firstElementChild.className = ''; d.firstElementChild.innerHTML = h; d.hidden = false; },
+      undlg = () => $('#dlg').hidden = true,
+      link = r => BASE + '/#/m/' + r.id + '/' + r.share.token,
+      esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-const DB = (() => { 
-  let p; 
-  const open = () => p || (p = new Promise((ok, no) => { 
-    const r = indexedDB.open('tk-spacemap', 1); 
-    r.onupgradeneeded = () => { r.result.createObjectStore('maps', { keyPath: 'id' }); }; 
-    r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); 
+const DB = (() => {
+  let p;
+  const open = () => p || (p = new Promise((ok, no) => {
+    const r = indexedDB.open('tk-spacemap', 2);
+    r.onupgradeneeded = () => {
+      const d = r.result;
+      if (!d.objectStoreNames.contains('maps')) d.createObjectStore('maps', { keyPath: 'id' });
+      if (!d.objectStoreNames.contains('events')) d.createObjectStore('events', { keyPath: 'k' });
+    };
+    r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error);
   }));
-  const tx = async (s, m, f) => { 
-    const d = await open(); 
-    return new Promise((ok, no) => { const t = d.transaction(s, m), q = f(t.objectStore(s)); t.oncomplete = () => ok(q && q.result); t.onerror = () => no(t.error); }); 
+  const tx = async (s, m, f) => {
+    const d = await open();
+    return new Promise((ok, no) => { const t = d.transaction(s, m), q = f(t.objectStore(s)); t.oncomplete = () => ok(q && q.result); t.onerror = () => no(t.error); });
   };
-  return { get: (s, k) => tx(s, 'readonly', o => o.get(k)), put: (s, v) => tx(s, 'readwrite', o => o.put(v)), 
-           del: (s, k) => tx(s, 'readwrite', o => o.delete(k)), all: s => tx(s, 'readonly', o => o.getAll()) }; 
+  return { get: (s, k) => tx(s, 'readonly', o => o.get(k)), put: (s, v) => tx(s, 'readwrite', o => o.put(v)),
+           del: (s, k) => tx(s, 'readwrite', o => o.delete(k)), all: s => tx(s, 'readonly', o => o.getAll()) };
 })();
-
-
 const mine = async () => (await DB.all('maps')).sort((a, b) => b.updated - a.updated);
-
 
 function deny(msg) {
   view('auth'); nav_(false);
   $('#auth').innerHTML = `<div class="card"><h3>Нет доступа</h3><p>${msg}</p>${EMB ? '' : '<div class="btns"><button class="pri" onclick="location.hash=\'\';location.reload()">На главную</button></div>'}</div>`;
 }
-
 
 async function nav() {
   const ms = await mine();
@@ -51,16 +52,13 @@ async function nav() {
     '<button class="ni" data-n="new">＋ Создать карту</button>';
 }
 
-
 function home(k) {
   view('home'); nav_(innerWidth >= 900);
   $('#home').innerHTML = k == 'new' ? `<div class="card"><h3>Новая карта пространства</h3><label>Название</label><input type="text" id="cn" maxlength="80"><label>Краткое описание (по желанию)</label><textarea id="cd"></textarea><div class="btns"><button data-a="cancel">Отмена</button><button class="pri" data-a="next">Далее</button></div></div>`
     : `<div><button class="plus" data-a="new" aria-label="Создать карту">+</button><div class="plus-t">Создать карту пространства</div></div>`;
 }
 
-
 async function leave() { if (st) { clearTimeout(st); await persist(); } }
-
 
 $('#cab').onclick = async e => {
   if (e.target.id == 'nbk') return nav_(false);
@@ -79,10 +77,7 @@ $('#cab').onclick = async e => {
   if (innerWidth < 900 && d.m) nav_(false);
   nav();
 };
-
-
 $('#hb').onclick = $('#bg').onclick = () => nav_();
-
 
 async function createMap() {
   const name = $('#cn').value.trim();
@@ -93,23 +88,20 @@ async function createMap() {
   openRec(r, 'owner'); sync();
 }
 
-
 function openRec(r, ro, solo) {
   rec = r; role = ro;
   body.toggleAttribute('data-solo', !!solo);
-  $('#shr').hidden = ro != 'owner' && ro != 'edit'; 
+  $('#shr').hidden = $('#sts').hidden = ro != 'owner' && ro != 'edit';
   view('map'); nav_(!solo && innerWidth >= 900);
   Core.open(r.data, ro);
   nav();
 }
-
 
 Core.onSave = d => {
   if (!rec || role == 'view') return;
   rec.data = d; rec.name = d.name || rec.name; rec.updated = Date.now(); rec.dirty = true;
   clearTimeout(st); st = setTimeout(persist, 500);
 };
-
 
 async function persist(r = rec) {
   st = 0;
@@ -118,14 +110,12 @@ async function persist(r = rec) {
   nav(); sync();
 }
 
-
 let sp = null, again = false;
 function sync() {
   if (sp) { again = true; return sp; }
   sp = (async () => { try { do { again = false; await doSync(); } while (again); } finally { sp = null; } })();
   return sp;
 }
-
 
 async function doSync() {
   if (!supabase || !navigator.onLine) return;
@@ -134,6 +124,16 @@ async function doSync() {
     const { error } = await supabase.from('maps').delete().eq('id', id);
     if (error) { console.error('sync delete', error); toast('Облако: ' + error.message); break; }
     localStorage.setItem('tk-del', JSON.stringify(dq().filter(x => x != id)));
+  }
+
+  if (!evOff) { // события статистики: отправляем пачками, после успеха удаляем с устройства
+    let ev = []; try { ev = await DB.all('events'); } catch {}
+    while (ev.length && !evOff) {
+      const part = ev.splice(0, 200),
+            { error } = await supabase.from('events').upsert(part.map(({ k, ...r }) => ({ id: k, ...r })), { onConflict: 'id', ignoreDuplicates: true });
+      if (error) { console.warn('events', error.message); evOff = true; break; }
+      for (const e of part) await DB.del('events', e.k).catch(() => {});
+    }
   }
 
   let all = [];
@@ -154,7 +154,6 @@ async function doSync() {
   }
 }
 
-
 async function pull() {
   if (!supabase || !navigator.onLine) return;
   for (const l of await mine()) {
@@ -170,9 +169,34 @@ async function pull() {
   }
 }
 
+/* ---------- статистика просмотров ---------- */
+let evOff = false; // таблицы events в облаке нет — копим события на устройстве
+const vid = (() => { try { let v = localStorage.getItem('tk-vid'); if (!v) localStorage.setItem('tk-vid', v = rnd().slice(0, 16)); return v; } catch { return 'anon'; } })();
+
+Core.onTrack = (kind, target) => {
+  if (!rec) return;
+  DB.put('events', { k: Date.now() + '_' + rnd().slice(0, 6), map_id: rec.id, kind, target: String(target || ''), vid, own: role != 'view', ts: Date.now() })
+    .then(() => sync()).catch(() => {});
+};
+
+// события за последние days дней: из облака + ещё не отправленные с этого устройства
+Core.fetchEvents = async days => {
+  const since = Date.now() - days * 864e5, seen = new Set(), out = [];
+  let err = null;
+  if (supabase && navigator.onLine) {
+    for (let from = 0; from < 20000; from += 1000) {
+      const { data, error } = await supabase.from('events').select('id,kind,target,vid,own,ts').eq('map_id', rec.id).gte('ts', since).order('ts', { ascending: false }).range(from, from + 999);
+      if (error) { err = error.message; break; }
+      data.forEach(e => { seen.add(e.id); out.push({ ...e, ts: Number(e.ts) }); });
+      if (data.length < 1000) break;
+    }
+  } else err = 'нет подключения к облаку';
+  try { (await DB.all('events')).filter(e => e.map_id == rec.id && e.ts >= since && !seen.has(e.k)).forEach(e => out.push(e)); } catch {}
+  return { ev: out, err };
+};
+$('#sts').onclick = () => rec && Core.showStats(rec);
 
 function dropRemote(id) { localStorage.setItem('tk-del', JSON.stringify([...dq(), id])); sync(); }
-
 
 function shareDlg() {
   const m = rec.share.mode, o = (v, t) => `<option value="${v}"${m == v ? ' selected' : ''}>${t}</option>`;
@@ -183,41 +207,34 @@ function shareDlg() {
     `<label>Без интернета</label><div class="btns" style="margin-top:0"><button data-d="pack">⬇ Офлайн-версия (.html)</button></div><p><small>Открывается на телефоне без сети.</small></p><div class="btns"><button class="pri" data-d="cancel">Готово</button></div>`);
 }
 
-
 const embedCode = r => `<iframe src="${BASE}/embed#/m/${r.id}/${r.share.token}" width="100%" height="640" style="border:0" allowfullscreen loading="lazy"></iframe>`;
-
-
 const touch = async () => { rec.updated = Date.now(); rec.dirty = true; await persist(); await sync(); };
-
 
 async function pack() {
   toast('Готовлю файл…');
   try {
     const t = u => fetch(u).then(r => r.ok ? r.text() : Promise.reject(u)), z = s => s.replace(/<\/script/gi, '<\\/script'),
           toData = async u => { const b = await (await fetch(u)).blob(); return new Promise(ok => { const f = new FileReader(); f.onload = () => ok(f.result); f.readAsDataURL(b); }); };
-    const [h, css, core, app, three] = await Promise.all(['index.html', 'style.css', 'script.js', 'app.js', THREE_URL].map(t)),
+    const EXTRA = ['plan.js', 'pano.js', 'capture.js', 'stats.js'],
+          [h, css, core, app, three, ...ex] = await Promise.all(['index.html', 'style.css', 'script.js', 'app.js', THREE_URL, ...EXTRA].map(t)),
           r = rec.share.mode == 'edit' ? 'edit' : 'view',
           inl = async u => /^https?:/.test(u || '') ? toData(u).catch(() => u) : u,
           floors = await Promise.all((rec.data.floors || []).map(async f => ({ ...f, bg: await inl(f.bg), panos: await Promise.all(f.panos.map(async p => ({ ...p, src: await inl(p.src) }))) }))),
           m = { ...rec, data: { ...rec.data, floors }, share: { mode: rec.share.mode, token: '' }, dirty: false },
-          out = h.replace(/<link rel="stylesheet" href="style.css">/, () => `<style>${css}</style>`)
+          out0 = h.replace(/<link rel="stylesheet" href="style.css">/, () => `<style>${css}</style>`)
             .replace(/<script src="https:\/\/cdn\.jsdelivr\.net\/npm\/@supabase[^"]*"><\/script>/, '')
-            .replace(/<script src="https:\/\/cdnjs[^"]*three[^"]*"><\/script>/, () => `<script>${z(three)}<\/script>`)
-            .replace(/<script src="script.js"><\/script>/, () => `<script>window.__PKG=${z(JSON.stringify({ map: m, role: r }))}<\/script><script>${z(core)}<\/script>`)
-            .replace(/<script src="app.js"><\/script>/, () => `<script>${z(app)}<\/script>`);
+            .replace(/<script src="https:\/\/cdnjs[^"]*three[^"]*"><\/script>/, () => `<script>${z(three)}</script>`)
+            .replace(/<script src="script.js"><\/script>/, () => `<script>window.__PKG=${z(JSON.stringify({ map: m, role: r }))}</script><script>${z(core)}</script>`)
+            .replace(/<script src="app.js"><\/script>/, () => `<script>${z(app)}</script>`);
+    const out = EXTRA.reduce((o, n, i) => o.replace(`<script src="${n}"></script>`, () => `<script>${z(ex[i])}</script>`), out0);
     const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([out], { type: 'text/html' }));
     a.download = (rec.name.replace(/[^\p{L}\p{N}]+/gu, '_') || 'map') + '.html';
     a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 4e4);
   } catch { toast('Не удалось собрать файл'); }
 }
 
-
 $('#shr').onclick = shareDlg;
-
-
 $('#dlg').onchange = async e => { if (e.target.id == 'sm') { rec.share.mode = e.target.value; await touch(); shareDlg(); } };
-
-
 $('#dlg').onclick = async e => {
   if (e.target.id == 'dlg') return undlg();
   const d = (e.target.closest('[data-d]') || {}).dataset;
@@ -233,7 +250,6 @@ $('#dlg').onclick = async e => {
   if (d.d == 'copyembed') { try { await navigator.clipboard.writeText($('#se').value); } catch { $('#se').select(); document.execCommand('copy'); } toast('Код скопирован'); }
   if (d.d == 'pack') pack();
 };
-
 
 async function openLink(id, tok) {
   let r = null;
@@ -258,14 +274,15 @@ async function openLink(id, tok) {
   openRec(r, ro, !!tok);
 }
 
-
+/* ---------- загрузка панорам в Supabase Storage ---------- */
+// уменьшаем до 4096 px по ширине: больше многие телефоны не принимают как WebGL-текстуру (будет чёрная сфера)
 const shrink = (f, w, q) => new Promise((ok, no) => {
   const u = URL.createObjectURL(f), i = new Image();
   i.onload = () => {
     URL.revokeObjectURL(u);
     const k = Math.min(1, w / i.width), c = document.createElement('canvas');
     c.width = Math.round(i.width * k); c.height = Math.round(i.height * k);
-    const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
+    const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.imageSmoothingQuality = 'high';
     g.drawImage(i, 0, 0, c.width, c.height);
     c.toBlob(b => b ? ok(b) : no(new Error('toBlob')), 'image/jpeg', q);
   };
@@ -273,24 +290,28 @@ const shrink = (f, w, q) => new Promise((ok, no) => {
   i.src = u;
 });
 
-
-window.uploadImage = async function (file, { max = 4096, q = .85, prefix = '' } = {}) {
+async function putBlob(blob, prefix = '') {
   if (!supabase) { toast('Облако недоступно (не загрузился Supabase)'); return null; }
   if (!navigator.onLine) { toast('Нет интернета — файл сейчас не загрузить'); return null; }
   try {
-    const blob = await shrink(file, max, q), name = prefix + Date.now() + '_' + rnd().slice(0, 8) + '.jpg';
+    const name = prefix + Date.now() + '_' + rnd().slice(0, 8) + '.jpg';
     const { error } = await supabase.storage.from('panoramas').upload(name, blob, { contentType: 'image/jpeg', cacheControl: '31536000' });
     if (error) { console.error('upload', error); toast('Ошибка загрузки: ' + error.message); return null; }
     const url = supabase.storage.from('panoramas').getPublicUrl(name).data.publicUrl;
     const chk = await fetch(url, { method: 'HEAD' }).catch(() => null);
     if (!chk || !chk.ok) { console.error('public url check', url, chk && chk.status); toast('Файл загружен, но по ссылке недоступен (HTTP ' + (chk ? chk.status : 'сеть/CORS') + '). Сделайте бакет panoramas публичным.'); return null; }
     return url;
-  } catch (e) { console.error(e); toast('Не удалось обработать файл'); return null; }
+  } catch (e) { console.error(e); toast('Не удалось загрузить файл'); return null; }
+}
+window.uploadBlob = putBlob;
+window.uploadImage = async function (file, { max = 4096, q = .85, prefix = '' } = {}) {
+  try { return await putBlob(await shrink(file, max, q), prefix); }
+  catch (e) { console.error(e); toast('Не удалось обработать файл'); return null; }
 };
-
-
-window.uploadPanorama = file => window.uploadImage(file, { max: 8192, q: .88 });
-
+// панорамы: Pano.prepare проверяет пропорции 2:1, понимает метаданные Photo Sphere (GPano),
+// уменьшает ступенчато и в безопасный для iOS размер — резкость сохраняется
+window.uploadPanorama = async file => { const r = await Pano.prepare(file); return r ? putBlob(r.blob) : null; };
+/* ---------------------------------------------------------- */
 
 (async () => {
   body.toggleAttribute('data-embed', EMB);
